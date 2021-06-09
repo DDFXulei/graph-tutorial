@@ -1,13 +1,83 @@
+require('dotenv').config();
+const session = require('express-session');
+const flash = require('connect-flash');
+const msal = require('@azure/msal-node');
+
 var createError = require('http-errors');
 var express = require('express');
 var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 
+
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
 
+var authRouter = require('./routes/auth');
+
 var app = express();
+
+// In-memory storage of logged-in users
+// For demo purposes only, production apps should store
+// this in a reliable storage
+app.locals.users = {};
+
+// MSAL config
+const msalConfig = {
+  auth: {
+    clientId: process.env.OAUTH_APP_ID,
+    authority: process.env.OAUTH_AUTHORITY,
+    clientSecret: process.env.OAUTH_APP_SECRET
+  },
+  system: {
+    loggerOptions: {
+      loggerCallback(loglevel, message, containsPii) {
+        console.log(message);
+      },
+      piiLoggingEnabled: false,
+      logLevel: msal.LogLevel.Verbose,
+    }
+  }
+};
+
+// Create msal application object
+app.locals.msalClient = new msal.ConfidentialClientApplication(msalConfig);
+
+
+// Session middleware
+// NOTE: Uses default in-memory session store, which is not
+// suitable for production
+app.use(session({
+  secret: 's9Y3fj~J-s~_r1E30pHn.ND1WYp_y6tk~D',
+  resave: false,
+  saveUninitialized: false,
+  unset: 'destroy'
+}));
+
+// Flash middleware
+app.use(flash());
+
+// Set up local vars for template layout
+app.use(function(req, res, next) {
+  // Read any flashed errors and save
+  // in the response locals
+  res.locals.error = req.flash('error_msg');
+
+  // Check for simple error string and
+  // convert to layout's expected format
+  var errs = req.flash('error');
+  for (var i in errs){
+    res.locals.error.push({message: 'An error occurred', debug: errs[i]});
+  }
+
+  // Check for an authenticated user and load
+  // into response locals
+  if (req.session.userId) {
+    res.locals.user = app.locals.users[req.session.userId];
+  }
+
+  next();
+});
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));
@@ -20,7 +90,9 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/', indexRouter);
+app.use('/auth', authRouter);
 app.use('/users', usersRouter);
+
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
